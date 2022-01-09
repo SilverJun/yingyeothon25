@@ -49,40 +49,30 @@ wchar_t dllDir[MAX_PATH];
 /* \\.. is used since dllDir is pointed to current DLL file*/
 wchar_t config[MAX_PATH] = L"\\..\\config.json";
 wchar_t configpath[MAX_PATH];
-//bitmaps
-WIN32_FIND_DATAW data;
-wchar_t bitmapDir[MAX_PATH];
-wchar_t frame[] = L"\\..\\frames\\*.bmp";
-int frames = 0;
-int currentFrame = 0;
-int commandFrame = 0;
-char *bitmapPixels = (char *)MEM_BAD;
+
+const int CONSOLE_WIDTH = 32;
+const int CONSOLE_HEIGHT = 32;
+char consoleScreen[CONSOLE_WIDTH][CONSOLE_HEIGHT] = {
+    {255, 255, 255},
+    {255, 255, 255},
+    {255, 255, 255},
+    {255, 255, 255},
+};
 
 int64_t __fastcall UpdateDataHook(void *ret)
 {
-
     handler = ret;
-    switch (commandFrame)
-    {
-    case 0:
-        currentFrame++;
-        if (currentFrame >= frames)
-        {
-            currentFrame = 0;
-        }
-        break;
-    case 1:
-        break;
-    default:
-        break;
-    }
+
     long v10;
     long v11;
     wchar_t w[5];
     char pixel;
     for (int i = 0; i < fakeCores; i++)
     {
-        pixel = *(bitmapPixels + (i + (currentFrame * fakeCores)));
+        int row = i / CONSOLE_WIDTH; // 행
+        int column = i % CONSOLE_WIDTH; // 열
+
+        pixel = consoleScreen[row][column];
         swprintf_s(w, L"%d%%", pixel);
         GetBlockColors(ret, pixel, &v11, &v10);
         SetBlockData(ret, i, w, v11, v10);
@@ -334,95 +324,6 @@ DWORD WINAPI attach(LPVOID dllHandle)
     unsigned short *cpu_count = (unsigned short *)((char *)GlobalSettings + GLOBAL_SETTINGS_CPU_OFFSET);
     *cpu_count = fakeCores;
     printDone(hConsole);
-    std::cout << "Scanning bitmaps and loading in memory..." << std::endl;
-    memcpy(bitmapDir, dllDir, sizeof(dllDir));
-    wcsncat(bitmapDir, frame, MAX_PATH);
-    std::wcout << "Bitmap scan at: " << bitmapDir << std::endl;
-    HANDLE hFind = FindFirstFileW(bitmapDir, &data);
-    if (hFind != INVALID_HANDLE_VALUE)
-    {
-        wchar_t files[MAX_PATH];
-        HDC hdc;
-        COLORREF col;
-        HBITMAP oldbitmap;
-        BITMAP bm = {0};
-        int allocate = 0;
-        int average = 0;
-        int byte = 0;
-        std::vector<std::wstring> bitmaps;
-        do
-        {
-            //TODO: Fix this bodge
-            swprintf_s(files, MAX_PATH, L"%s\\..\\frames\\%s", dllDir, data.cFileName);
-            HBITMAP hBitMap = (HBITMAP)::LoadImageW(NULL, files, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
-            GetObject(hBitMap, sizeof(bm), &bm);
-            SetConsoleTextAttribute(hConsole, 11);
-            std::wcout << L"Loading: " << data.cFileName << L" Size W:" << bm.bmWidth << L" L:" << bm.bmHeight << std::endl;
-            SetConsoleTextAttribute(hConsole, 7);
-            bitmaps.push_back(data.cFileName);
-            allocate += bm.bmWidth * bm.bmHeight;
-        } while (FindNextFileW(hFind, &data));
-        FindClose(hFind);
-        std::cout << "Sorting bitmaps...";
-        std::sort(bitmaps.begin(), bitmaps.end(), compareFunction);
-        printDone(hConsole);
-        std::cout << "Total bitmaps: " << bitmaps.size() << std::endl;
-        std::cout << "Occupying " << allocate << " bytes...";
-        bitmapPixels = (char *)malloc(allocate);
-        if (bitmapPixels == (mem_voidptr_t)MEM_BAD)
-        {
-            printFail(hConsole);
-            SetConsoleTextAttribute(hConsole, 12);
-            std::cout << "malloc failed! waiting for exit" << std::endl;
-            SetConsoleTextAttribute(hConsole, 7);
-            return 0;
-        }
-        else
-        {
-            printDone(hConsole);
-        }
-        std::cout << "Processing region " << std::endl;
-        for (std::wstring &s : bitmaps)
-        {
-            //how dare thy repeat code like this!
-            //will fix later calm down
-            //TODO: Fix this bodge
-            swprintf_s(files, L"%s\\..\\frames\\%s", dllDir, s.c_str());
-            HBITMAP hBitMap = (HBITMAP)::LoadImageW(NULL, files, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
-            GetObject(hBitMap, sizeof(bm), &bm);
-            hdc = CreateCompatibleDC(NULL);
-            oldbitmap = (HBITMAP)SelectObject(hdc, hBitMap);
-            for (int y = 0; y < bm.bmHeight; y++)
-            {
-                for (int x = 0; x < bm.bmWidth; x++)
-                {
-                    //TODO: avoid this
-                    col = GetPixel(hdc, x, y);
-                    average = ((GetRValue(col) + GetGValue(col) + GetBValue(col)) / 3);
-                    *(bitmapPixels + byte) = (char)map(average, 255, 0, 0, 100);
-                    byte++;
-                }
-            }
-            // Clean up
-            SelectObject(hdc, oldbitmap);
-            DeleteDC(hdc);
-            frames++;
-            std::cout << "\r" << frames << "/" << bitmaps.size();
-        }
-    }
-    std::cout << std::endl;
-    if (frames > 0)
-    {
-        SetConsoleTextAttribute(hConsole, 11);
-        std::cout << "Found frames: " << frames << std::endl;
-        SetConsoleTextAttribute(hConsole, 7);
-    }
-    else
-    {
-        SetConsoleTextAttribute(hConsole, 12);
-        std::cout << "No frames found, waiting for exit" << std::endl;
-        return 0;
-    }
 
     std::cout << "Waiting for handler to populate{Switch over to the performance tab}...";
     while (handler == (mem_voidptr_t)MEM_BAD)
@@ -437,7 +338,6 @@ DWORD WINAPI attach(LPVOID dllHandle)
     SetConsoleTextAttribute(hConsole, 7);
     while (true)
     {
-
         switch (getch())
         {
         case ('H'):
@@ -544,10 +444,6 @@ extern "C" BOOL APIENTRY DllMain(HMODULE hModule,
     case DLL_THREAD_DETACH:
         break;
     case DLL_PROCESS_DETACH:
-        if (bitmapPixels != (char *)MEM_BAD)
-        {
-            free(bitmapPixels);
-        }
         MessageBoxW(NULL, L"DLL exited successfully", L"Info", MB_ICONINFORMATION);
         break;
     }
